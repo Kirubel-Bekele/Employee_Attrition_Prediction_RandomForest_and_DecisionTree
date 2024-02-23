@@ -1,6 +1,6 @@
 ---
 title: "Machine Learning Final"
-author: "Hoya 1: Kathryn Anderson, Kirubel Bekele, Novleen Cheema, Thomas Hoover, and Will Salvi"
+author: ""
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output:
   pdf_document:
