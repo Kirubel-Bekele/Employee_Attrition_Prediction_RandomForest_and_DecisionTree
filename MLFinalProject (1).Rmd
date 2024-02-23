@@ -1,0 +1,730 @@
+---
+title: "Machine Learning Final"
+author: "Hoya 1: Kathryn Anderson, Kirubel Bekele, Novleen Cheema, Thomas Hoover, and Will Salvi"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    toc: yes
+    number_sections: yes
+    toc_depth: 3
+  word_document:
+    toc: yes
+    number_sections: yes
+    toc_depth: 3
+  html_document:
+    css: styles.css
+    toc: yes
+    toc_depth: '3'
+    df_print: paged
+fontsize: 12pt
+fontfamily: libertine
+geometry: margin=1in
+spacing: single
+always_allow_html: true
+---
+
+```{r import libs, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(webshot2)
+library(gdata)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(corrplot)
+library(kableExtra)
+library(tidyverse)
+library(stringr)
+library(modelsummary)
+library(lubridate)
+library(scales)
+library(graphics)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(parttree)
+```
+
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE,include=FALSE, tidy=TRUE, cache=TRUE, message=FALSE, warning=FALSE,tidy.opts=list(width.cutoff=55, keep.blank.line=FALSE),fig.align='center')
+```
+
+
+```{r load dataset,include=FALSE,echo=FALSE}
+library(readxl)
+employee = read_excel("Employee_Data_Project.xlsx")
+str(employee)
+```
+
+# Abstract
+
+This analysis applies classification-based machine learning models to solve the problem of attrition at Canterra. Using attrition as a target variable, our team of consultants considers potential predictors of employees leaving the company, such as age, income, and marital status. Using different combinations of these predictors, we develop logistic, decision tree, and random forest models to examine which methodology produces the best results.
+
+# Introduction
+
+Canterra, like many companies, struggles with employee turnover. With more than 4,000 employees and an attrition rate of approximately 15%, we aim to pose business solutions by considering potential causes of attrition and developing a variety of predictive models. Employee turnover can be costly, so it is important to consider how the company can modify the hiring and training process to ensure that any new employees align with company and receive the tools they need to succeed. Above that, we should review what the company can do to ensure current employees are inclined to stay with Canterra.
+
+# Exploratory Analysis
+
+```{r target variable analysis}
+library(ggplot2)
+
+ggplot(employee, aes(x = Age, fill=Attrition)) + 
+  geom_histogram()+theme_bw()+
+  labs(title = "Histogram of Age by Attrition",
+       x = "Age",
+       y="Frequency")+
+  theme(plot.title = element_text(hjust = .5,
+                                  size = 12),
+        axis.title.x = element_text(size = 8, color = "black"),
+        axis.title.y = element_text(size = 8, color = "black"),
+        axis.text.x = element_text(size = 8, color = "black"),
+        axis.text.y = element_text(size = 8, color = "black"))
+```
+
+
+```{r attrition, echo=FALSE,include=FALSE}
+#Number of classes. Unbalanced given only 16.17% fall into the Attrition Category
+
+## "See" the y (Attrition) variable and its count. Do the classes (0 or 1) seem balanced or unbalanced? This can be done by using table() and prop.table(), no need to show the table or the proportion but describe what you "see".
+
+library(flextable)
+freq_table = table(employee$Attrition)
+prop_table = prop.table(freq_table)
+
+df_freq = as.data.frame(freq_table)
+df_prop = as.data.frame(prop_table)
+
+ft_freq = flextable(df_freq)
+ft_prop = flextable(df_prop)
+
+ft_freq
+ft_prop
+```
+
+## Data Wrangling
+
+To consider the rest of the data, we assessed the presence of null values in the `JobSatisfaction`, `TotalWorkingYears`, `NumCompaniesWorked`, and `EnvironmentSatisfaction` variables. Depending on the variable type, we replaced null values with the mode and mean. This seemed more appropriate than omitting them from the dataset, given that 72 observations contained null values. 
+
+```{r null values}
+#Omitting null observations
+employee$JobSatisfaction[employee$JobSatisfaction=="NA"] = NA
+employee$TotalWorkingYears[employee$TotalWorkingYears=="NA"] = NA
+employee$NumCompaniesWorked[employee$NumCompaniesWorked=="NA"] = NA
+employee$EnvironmentSatisfaction[employee$EnvironmentSatisfaction=="NA"] = NA
+apply(employee,2,anyNA)
+
+
+#Locating missing values in Total Working Years and Number of Companies Worked
+Null_TotalWorkingYears = which(is.na(employee$TotalWorkingYears))
+Null_NumCompaniesWorked = which(is.na(employee$NumCompaniesWorked))
+Null_JobSatisfaction = which(is.na(employee$JobSatisfaction))
+Null_EnvironmentSatisfaction = which(is.na(employee$EnvironmentSatisfaction))
+
+#Converting TotalWorkingYears to numeric
+employee = employee %>% 
+  mutate(TotalWorkingYears = as.numeric(TotalWorkingYears))
+
+#Replacing missing values with Mode (and mean for TotalWorkingYears)
+employee$TotalWorkingYears[Null_TotalWorkingYears] = mean(employee$TotalWorkingYears,na.rm=T)
+
+employee$NumCompaniesWorked[Null_NumCompaniesWorked] = names(which.max(table(employee$NumCompaniesWorked)))
+
+employee$JobSatisfaction[Null_JobSatisfaction] = names(which.max(table(employee$JobSatisfaction)))
+
+employee$EnvironmentSatisfaction[Null_EnvironmentSatisfaction] = names(which.max(table(employee$EnvironmentSatisfaction)))
+```
+The raw data contains several numerical variables that may be better suited as categorical. For instance, `TrainingTimesLastYear` refers to a discrete count, while `Education` and `JobLevel` assign numbers to a specific level. For all non-continuous numerical variables, we chose to label-encode responses to facilitate our ability to interpret future models. We kept all other variables the same, with the exception of `Income`, which we scaled for purposes of normalizing the predictor. 
+
+Because of the complete homogeneity in the `StandardHours` variable and complete heterogeneity in the `EmployeeID` variable, we excluded them from the analysis entirely.  
+
+```{r categorical variables}
+## Make sure to address categorical variables appropriately. Remember, it could be beneficial to have one hot encoding. You can also transform some of the continuous x variables. In case you do explain the rationale.
+
+employee$Attrition <- ifelse(employee$Attrition=="Yes","1","0") 
+employee_data = employee %>% 
+  mutate(Attrition = as.factor(Attrition),
+         Education = case_when(Education==1~"below college",
+                               Education==2~"college",
+                               Education==3~"bachelor",
+                               Education==4~"master",
+                               Education==5~"doctor"),
+         JobLevel = case_when(JobLevel==1~"entry level",
+                              JobLevel==2~"associate",
+                              JobLevel==3~"middle management",
+                              JobLevel==4~"management",
+                              JobLevel==5~"senior management"),
+         JobSatisfaction = case_when(JobSatisfaction=="1"~"extremely unsatisfied",
+                                     JobSatisfaction=="2"~"unsatisfied",
+                                     JobSatisfaction=="3"~"satisfied",
+                                     JobSatisfaction=="4"~"extremely satisfied"),
+         EnvironmentSatisfaction = case_when(EnvironmentSatisfaction=="1"
+                                             ~"extremely unsatisfied",
+                                             EnvironmentSatisfaction=="2"
+                                             ~"unsatisfied",
+                                             EnvironmentSatisfaction=="3"
+                                             ~"satisfied",
+                                             EnvironmentSatisfaction=="4"
+                                             ~"extremely satisfied"),
+         Income = scale(Income),
+         TrainingTimesLastYear = case_when(TrainingTimesLastYear==0~"none",
+                                           TrainingTimesLastYear==1~"one",
+                                           TrainingTimesLastYear==2~"two",
+                                           TrainingTimesLastYear==3~"three",
+                                           TrainingTimesLastYear==4~"four",
+                                           TrainingTimesLastYear==5~"five",
+                                           TrainingTimesLastYear==6~"six")) %>% 
+  dplyr::select(-c(EmployeeID,StandardHours))
+str(employee_data)
+```
+## Correlation Between Predictors
+
+The correlation plot in Figure 1 displays the relationship with the variables in Canterra's data. Unsurprisingly, variables that are measured by years seem to be strongly correlated with each other. This makes sense given that an individual's working years and years at the company will all increase as age increases. The same logic applies to the strong correlation between years at the company and years with the current manager. Such relationships will be considered in determining the best combination of predictors. 
+
+```{r correlation between numerical variables}
+##Plot the correlations between the continuous variables. You can choose to move the plot in the appendix. Code can be reused from Week 2/3. Explain the variables that could have a high correlation. By extension, you will decide (your choice, justify) whether to include the variable or not. You can include the rationale here and place all the supporting information in the Appendix
+
+continuous = employee_data %>% 
+  select_if(is.numeric)
+
+correlation = cor(continuous)
+
+filtered_continuous_vars <- continuous %>% 
+  select_if(function(x) var(x, na.rm = TRUE) > 0 & mean(is.na(x)) < 0.5)
+  
+  # Recalculate correlations
+fixed_correlations <- cor(filtered_continuous_vars, use = "complete.obs")
+  
+  # Replace NA with 0 in correlation matrix
+fixed_correlations[is.na(fixed_correlations)] <- 0
+  
+  # Plotting correlations among continuous variables
+corrplot(fixed_correlations, method = "color", order = "hclust", addCoef.col = "black", 
+         tl.cex = 0.75, tl.srt = 45, type= 'lower',number.cex= 0.60)
+
+#Years with current manager and years at company are highly correlated, so I will be removing years with current manager.
+
+employee_data = employee_data %>% 
+  dplyr::select(-c(YearsWithCurrManager))
+```
+## Data Partition 
+
+After the data-wrangling process, we proceeded to partition the data. Our train set reserves 70% of the original data to develop the various machine learning models, while the test set contains 30% to be used for assessing model performance. 
+
+```{r partition}
+##Create a train and test split here as long as you have all the transformations made to your satisfaction. 
+set.seed(123)
+index <- createDataPartition(employee_data$Attrition, p = 0.7,
+                             list = FALSE)
+train <- employee_data[index,]
+test <- employee_data[-index,]
+```
+
+# Logistic Regression
+
+To initialize model development, we used the logistic regression method. Due to the binary nature of the response variable, the data is a good fit for this type of algorithm. We will be able to classify attrition using a probability that lies between 0 and 1, though the model uses the log of odds to transform the range of values to negative infinity and infinity. This extended range normalizes our outcomes so that coefficients and intercepts can be easily applied.
+
+The first model explores `Age`, `JobSatisfaction`, `BusinessTravel`, and `MaritalStatus` as predictors of attrition. Such predictors were determined to be significant through creation of a preparatory logistic model that considers all variables. While there seemed to be many significant predictors, as indicated by a p-value of less than .05, we isolated these four variables to (1) minimize the multi-collinearity between age and other year-based variables and (2) reduce the number of parameters. Through this initial regression, we found that variables such as income and training times were less significant, amongst others.  
+
+Reviewing the first model, it is apparent that there is a negative relationship between age and the log odds of attrition. As age increases, the first regression model anticipates that the log odds of attrition will decrease by -.0432. The remaining predictors in the initial model are categorical, and contain dummy variables to account for one less than the total number of observations within each category. Though all of the coefficients for these categorical predictors are positive, it seems individuals who are single, travel frequently for business, or are extremely unsatisfied with their job are subject to a faster rate in the log odds of attrition. As for the intercept, the value reveals that the log odds of attrition will be -1.9464 when there the values of all variable are zero, which is unlikely. 
+
+The below formula quantifies this model and provides a reference for converting the log of odds into probability. 
+
+$$
+\begin{align}
+\ln\left(\frac{\mathbb{P}(M)}{1-\mathbb{P}(M)}\right)&=-1.946453-0.043294*Age+0.913061*JobSatisfaction1+0.609865*JobSatisfaction2+0.470890*JobSatisfaction3+1.322183*BusinessTravelFrequently+0.688925*BusinessTravelRarely+0.317876*Married+1.167596*Single\\\mathbb{P}(M) &=\frac{e^{-1.946453-0.043294*Age+0.913061*JobSatisfaction1+0.609865*JobSatisfaction2+0.470890*JobSatisfaction3+1.322183*BusinessTravelFrequently+0.688925*BusinessTravelRarely+0.317876*Married+1.167596*Single}}{1+e^{-1.946453-0.043294*Age+0.913061*JobSatisfaction1+0.609865*JobSatisfaction2+0.470890*JobSatisfaction3+1.322183*BusinessTravelFrequently+0.688925*BusinessTravelRarely+0.317876*Married+1.167596*Single}}
+\end{align}
+$$
+```{r glm1}
+library(MASS)
+
+#Model with Everything for Stepwise Regression (And for determining significant predictors for Model 1.)
+logistic_model = glm(Attrition~.,data=employee_data,family=binomial)
+summary(logistic_model)
+
+#Model using smaller selection of variables
+
+glm1 = glm(Attrition~Age+JobSatisfaction+BusinessTravel+MaritalStatus,data=train,family=binomial)
+summary(glm1)
+
+```
+
+Because our first logistic model was manually selected, we applied a subset regression to see what the function extracted as the best predictors. This model contains the same predictors as the first, with additional variables for `Education`, `JobLevel`, `NumCompaniesWorked`, `TotalWorkingYears`, `TrainingTimesLastYear`, and `EnvironmentSatisfaction`. The additional number of variables increases the complexity of the model, but we can still gather key insights from the coefficients. For instance, individuals who have worked at many companies have a higher log odds of attrition. Similarly, individuals who are at the senior level of their job have a negative log odds of attrition. 
+
+```{r glm2}
+#Model using Stepwise Regression - Regression is correctly including all dummy variables
+glm2 = stepAIC(logistic_model,direction="both",trace=FALSE)
+step_glm = summary(glm2)
+step_glm
+```
+
+```{r logistic summary stats}
+#Summary Metrics
+
+aic_values <- c(AIC(glm1), AIC(glm2))
+log_likelihood <- c(logLik(glm1), logLik(glm2))
+bic_values <- c(BIC(glm1), BIC(glm2))
+
+# Create a data frame for model names and metrics
+model_metrics <- data.frame(
+  model_name = c("Model 1", "Model 2"),
+  aic_value = aic_values,
+  log_likelihood = log_likelihood,
+  bic_value = bic_values
+)
+
+# Create the model summary table
+model_metrics %>%
+  kable("html") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width = T,
+    position = "center",
+    font_size = 11
+  )
+
+```
+## Model Metrics
+
+The statistics for AIC, log likelihood, and BIC help give us metrics with which to compare models based on maximum likelihood and complexity, such that the lowest AIC and BIC values and highest log likelihood value correspond to the best-performing model. Table one includes such metrics for the manually-selected model ("Model 1") and best subset model ("Model 2"). In all three instances, the metric prefers Model 1. Model 2 naturally has a higher AIC and BIC, given that such statistics penalize for more parameters. Overall, the less complex model is preferred. 
+
+## ROC Curve
+
+Plotting the true positive versus false positive rate provides more insights into the performance of both models. The ideal model will attain a balance of sensitivity and specificity, in which the resulting ROC curve will reach the top left corner of the graph. Neither Model 1 nor Model 2 achieve this standard, but still surpass the .5 threshold. Specifically, Model 1 has an AUC of .7, while Model 2 has an AUC of .75. Ultimately, the increased number of predictors in Model 2 results in a higher AUC, though we will still rely on the previous metrics, specifically BIC, for determining the best-performing model 
+
+```{r prep for roc}
+# Load necessary libraries
+#Not plotting ROC curve because it will be plotted at end.
+library(pROC)
+
+# Calculate predicted probabilities for each model using the test dataset
+predicted_probs_glm1 <- predict(glm1, newdata = test, type = "response")
+predicted_probs_glm2 <- predict(glm2, newdata = test, type = "response")
+
+# Create ROC curve objects for each model
+
+roc_glm1 <- roc(test$Attrition, predicted_probs_glm1)
+roc_glm2 <- roc(test$Attrition, predicted_probs_glm2)
+```
+
+
+## AUC
+
+```{r auc for logistic models}
+#AUC for logistic models
+auc_glm1 <- round(auc(roc_glm1),4)
+auc_glm2 <- round(auc(roc_glm2),4)
+
+print(auc_glm1)
+print(auc_glm2)
+```
+
+## Confusion Matrix
+
+Using Model 1 to develop a confusion matrix, we can assess the details between the true positive and false positive rate. To do so, we used a standard threshold of .5, in which probabilities exceeding .5 indicate that attrition occurred. Thus, the matrix presents 12 true positives versus 4 false positives, compared with 1105 true negatives, with 201 false negatives. Given the number of false negatives, it can be inferred that the model is more specific than sensitive. However, we are 95% confident that the accuracy of this model will be between 82.43% and 86.40%. 
+
+Before proceeding with recommendations based on the logistic models, it is important to consider how other classification-based algorithms may compare with these results. 
+```{r}
+library(reshape2)
+predicted_classes_glm1 = ifelse(predicted_probs_glm1 > .5,1,0)
+test$predicted_classes_glm1 = predicted_classes_glm1
+test$predicted_probs_glm1 = predicted_probs_glm1
+
+table(test$Attrition, test$predicted_classes_glm1)
+
+cm_glm1 = confusionMatrix(data = as.factor(test$predicted_classes_glm1),
+                     reference = as.factor(test$Attrition),
+                     positive="1")
+cm_glm1
+
+str(test)
+# Convert the confusion matrix to a data frame for plotting
+cm_df_glm1 <- as.data.frame(cm_glm1$table)
+
+# Reshape for ggplot
+cm_melt_glm1 <- melt(cm_df_glm1)
+
+# Plotting the confusion matrix
+ggplot(data = cm_melt_glm1, mapping = aes(x = Reference, y = Prediction)) +
+  geom_tile(aes(fill = value), colour = "white") +
+  geom_text(aes(label = sprintf("%1.0f", value)), vjust = 1) +
+  scale_fill_gradient(low = "lavender", high = ("salmon")) +
+  theme_bw() + theme(legend.position = "none")
+```
+
+#Decision Trees
+
+```{r}
+#Initial decision tree is limited to 2 splits 
+basic_tree <- rpart(Attrition ~ ., data = train, method = "class",control = rpart.control(maxdepth = 2))
+rpart.plot(basic_tree)
+```
+```{r split1 metrics}
+#Calculating Entropy and Gini Index for each split
+subset1 <- train[train$TotalWorkingYears < 2, ]
+subset2 <- train[train$TotalWorkingYears >= 2, ]
+
+# Function to calculate Gini Index
+gini_index <- function(subset) {
+  table <- table(subset$Attrition)
+  probs <- table / sum(table)
+  return(1 - sum(probs^2))
+}
+
+# Function to calculate Entropy
+entropy <- function(subset) {
+  table <- table(subset$Attrition)
+  probs <- table / sum(table)
+  return(-sum(probs * log2(probs + 1e-9)))  # Adding a small number to avoid log(0)
+}
+
+# Calculate Gini Index and Entropy for each subset
+gini1 <- gini_index(subset1)
+gini2 <- gini_index(subset2)
+entropy1 <- entropy(subset1)
+entropy2 <- entropy(subset2)
+
+# Calculate weighted averages
+n1 <- nrow(subset1)
+n2 <- nrow(subset2)
+n <- n1 + n2
+
+weighted_gini <- (n1/n)*gini1 + (n2/n)*gini2
+weighted_entropy <- (n1/n)*entropy1 + (n2/n)*entropy2
+
+weighted_gini
+weighted_entropy
+```
+
+```{r split2 metrics}
+# Splitting each subset further based on sulphates < 0.69
+subset1a <- subset1[subset1$MaritalStatus %in% c("Divorced"), ]
+subset1b <- subset1[!(subset1$MaritalStatus %in% c("Divorced")), ]
+subset2a <- subset1[subset1$MaritalStatus %in% c("Divorced"), ]
+subset2b <- subset2[!(subset2$MaritalStatus %in% c("Divorced")), ]
+
+# Calculate Gini and Entropy for each new subset
+gini1a <- gini_index(subset1a)
+gini1b <- gini_index(subset1b)
+gini2a <- gini_index(subset2a)
+gini2b <- gini_index(subset2b)
+
+entropy1a <- entropy(subset1a)
+entropy1b <- entropy(subset1b)
+entropy2a <- entropy(subset2a)
+entropy2b <- entropy(subset2b)
+
+# Weighted Gini and Entropy for the new splits
+n1a <- nrow(subset1a)
+n1b <- nrow(subset1b)
+n2a <- nrow(subset2a)
+n2b <- nrow(subset2b)
+
+weighted_gini_new_split <- (n1a/n)*gini1a + (n1b/n)*gini1b + (n2a/n)*gini2a + (n2b/n)*gini2b
+weighted_entropy_new_split <- (n1a/n)*entropy1a + (n1b/n)*entropy1b + (n2a/n)*entropy2a + (n2b/n)*entropy2b
+
+# Calculating information gain
+info_gain_gini <- weighted_gini - weighted_gini_new_split
+info_gain_entropy <- weighted_entropy - weighted_entropy_new_split
+
+info_gain_gini
+info_gain_entropy
+```
+
+
+```{r advanced tree}
+#Creating advanced tree with given parameters
+control_params <- rpart.control(minsplit = 20, minbucket = 20/3, cp = 0.01, 
+                                maxcompete = 4, maxsurrogate = 5, usesurrogate = 2, maxdepth = 30)
+
+advanced_tree <- rpart(Attrition ~ ., data = train, method = "class", control = control_params)
+rpart.plot(advanced_tree)
+
+```
+```{r metrics for basic tree model}
+# Evaluating the Basic Model
+# Predicting on the test data and creating the confusion matrix
+predictions_tree1 <- predict(basic_tree, test, type = "class")
+conf_matrix_tree1 <- confusionMatrix(predictions_tree1, test$Attrition)
+
+# Calculating AUC for Basic Model
+probabilities_tree1 <- predict(basic_tree, test, type = "prob")[,2]
+pred_tree1 <- prediction(probabilities_tree1, test$Attrition)
+auc_tree1 <- performance(pred_tree1, measure = "auc")@y.values[[1]]
+accuracy_tree1 <- sum(predictions_tree1 == test$Attrition) / nrow(test)
+
+# Printing the results
+print(conf_matrix_tree1)
+print(paste("AUC for Basic Tree:", auc_tree1))
+print(paste("Accuracy for Basic Tree:", accuracy_tree1))
+
+
+```
+```{r metrics for advanced model}
+# Evaluating the Advanced Model
+# Predicting on the test data and creating the confusion matrix
+predictions_tree2 <- predict(advanced_tree, test, type = "class")
+conf_matrix_tree2 <- confusionMatrix(predictions_tree2, test$Attrition)
+
+# Calculating AUC for Advanced Model
+probabilities_tree2 <- predict(advanced_tree, test, type = "prob")[,2]
+pred_tree2 <- prediction(probabilities_tree2, test$Attrition)
+auc_tree2 <- performance(pred_tree2, measure = "auc")@y.values[[1]]
+accuracy_tree2 <- sum(predictions_tree2 == test$Attrition) / nrow(test)
+
+# Printing the results
+print(conf_matrix_tree2)
+print(paste("AUC for Advanced Tree:", auc_tree2))
+print(paste("Accuracy for Advanced Tree:", accuracy_tree2))
+
+```
+visualizing the importance of the variables 
+```{r variable importance}
+# Variable importance plot for Advanced Model
+var_importance_tree2 <- vip::vip(advanced_tree, num_features = 15)
+print(var_importance_tree2)
+
+```
+```{r comparing models}
+# Creating a data frame for model comparison. 
+comparison_df <- data.frame(
+  Model = c("Basic Tree", "Advanced Tree"),
+  Accuracy = c(accuracy_tree1, accuracy_tree2),
+  AUC = c(auc_tree1, auc_tree2),
+  Sensitivity = c(conf_matrix_tree1$byClass["Sensitivity"], conf_matrix_tree2$byClass["Sensitivity"]),
+  Specificity = c(conf_matrix_tree1$byClass["Specificity"], conf_matrix_tree2$byClass["Specificity"])
+)
+
+# Creating the comparison table using kable and kableExtra
+kable(comparison_df, "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(1, bold = TRUE)
+```
+
+```{r extracting basic level metrics}
+# Extracting class-level metrics for the Basic Model. May not be necessary to include in presentation.
+class_metrics_basic_train <- confusionMatrix(predict(basic_tree, train, type = "class"), train$Attrition)$byClass
+class_metrics_basic_test <- conf_matrix_tree1$byClass
+
+# Combining metrics into a data frame for the Basic Model
+class_comparison_basic <- data.frame(
+  Metric = names(class_metrics_basic_train),
+  Training = as.numeric(class_metrics_basic_train),
+  Testing = as.numeric(class_metrics_basic_test)
+)
+
+# Creating and formatting the table for the Basic Model
+kable(class_comparison_basic, "html", caption = "Class-Level Performance for Basic Model: Training vs Testing") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(1, bold = TRUE)
+
+
+```
+
+
+```{r extracting advanced metrics}
+# Extracting class-level metrics for the Advanced Model
+class_metrics_advanced_train <- confusionMatrix(predict(advanced_tree, train, type = "class"), train$Attrition)$byClass
+class_metrics_advanced_test <- conf_matrix_tree2$byClass
+
+# Combining metrics into a data frame for the Advanced Model
+class_comparison_advanced <- data.frame(
+  Metric = names(class_metrics_advanced_train),
+  Training = as.numeric(class_metrics_advanced_train),
+  Testing = as.numeric(class_metrics_advanced_test)
+)
+
+# Creating and formatting the table for the Advanced Model
+kable(class_comparison_advanced, "html", caption = "Class-Level Performance for Advanced Model: Training vs Testing") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) %>%
+  column_spec(1, bold = TRUE)
+
+```
+
+
+
+
+# Random Forest 
+
+Our final models use the Random Forest method. This ensemble method uses bagging to train the model by taking multiple samples from the train dataset, with replacement. Each sample is then fitted to a decision tree, resulting in an algorithm that employs multiple trees to make predictions. With a random subset of predictors at each split, the combination of independent trees tends to produce an algorithm with strong predictive power. 
+
+To start, we used the train data to create a Random Forest model with 100 trees and 10 nodes. Plotting this model reveals that `TotalWorkingYears`, `YearsatCompany`, `Age`, and `Marital Status` are strong predictors, as indicated by the Mean Decrease Gini. This statistic is related to the Gini Index, which refers to the impurity and resulting chances of misclassification. Thus, variables with a higher Mean Decrease Gini have a higher predictive power. 
+
+```{r randomforest1}
+# Install and load the randomForest package
+library(randomForest)
+
+# Build the Random Forest model
+rf1 <- randomForest(Attrition ~ ., data = train,  maxnodes = 10, ntree = 100)
+
+# Print the model summary
+print(rf1)
+
+varImpPlot(rf1)
+```
+When applied to the test data, the confusion matrix reveals 27 true positives, 1100 true negatives, 9 false positives and 186 false negatives. Therefore, the model returns 85.25% accuracy, with a 95% confidence interval of 83.22% and 87.12%. The No Information Rate ("NIR") reveals that 83.89% of observations would be predicted correctly if we were to simply classify all outcomes as non-attrition. Though the 85.25% accuracy exceeds the 83.89% NIR, the p-value of .09 indicates that we cannot reject the null hypothesis that the NIR is higher than accuracy. 
+```{r prediction of rf1}
+predictions_rf1 <- predict(rf1, test)
+
+# Evaluate the model performance
+confusion_matrix <- table(test$Attrition, predictions_rf1)
+print(confusion_matrix)
+```
+
+```{r accuracy of rf1}
+library(caret)
+accuracy <- confusionMatrix(predictions_rf1, test$Attrition)
+accuracy
+```
+Plotting an ROC curve of each predicted class, attrition and non-attrition, returns an AUC of 0.6972, which surpasses the .5 threshold for the balance of sensitivity and specificity. 
+
+```{r roc curve of rf1}
+#Not necessary to include in presentation because ROC curve will be compared at end with all other models.
+library(ROCR)
+# Calculate the probability of new observations belonging to each class
+# prediction_for_roc_curve will be a matrix with dimensions data_set_size x number_of_classes
+prediction_for_roc_curve_rf1 <- predict(rf1,test[,-2],type="prob")
+# Use pretty colours:
+pretty_colours <- c("#F8766D","#00BA38","#619CFF")
+# Specify the different classes 
+classes <- levels(test$Attrition)
+# For each class
+for (i in 1:2)
+{
+ # Define which observations belong to class[i]
+ true_values <- ifelse(test[,2]==classes[i],1,0)
+ # Assess the performance of classifier for class[i]
+ pred_rf1 <- prediction(prediction_for_roc_curve_rf1[,i],true_values)
+ perf_rf1 <- performance(pred_rf1, "tpr", "fpr")
+ if (i==1)
+ {
+     plot(perf_rf1,main="ROC Curve",col=pretty_colours[i]) 
+ }
+ else
+ {
+     plot(perf_rf1,main="ROC Curve",col=pretty_colours[i],add=TRUE) 
+ }
+ # Calculate the AUC and print it to screen
+ auc.perf <- performance(pred_rf1, measure = "auc")
+ print(auc.perf@y.values)
+}
+```
+
+```{r rf2}
+#Second attempt using less nodes and more trees
+# Build the Random Forest model
+rf2 <- randomForest(Attrition ~ ., data = train,  maxnodes = 2, ntree = 1000)
+
+# Print the model summary
+print(rf2)
+
+varImpPlot(rf2)
+```
+
+In another Random Forest model, we developed an algorithm with 1000 trees and 2 nodes. The Decrease Mean Gini follows a similar pattern as that for the initial model. Therefore, we can determine that both models consider the same four features as the strongest predictors of attrition. 
+
+In a confusion matrix with 1109 true negatives and 213 false negatives, the second model does not predict attrition at all. The accuracy of this model is 83.89%, which is the same value as the No Information Rate. In other words, this model does not seem productive due to the absence of true and false positives. We could attain the same accuracy by simply using the most frequent class to predict outcomes. 
+
+```{r predictions for rf2}
+predictions_rf2 <- predict(rf2, test)
+
+# Evaluate the model performance
+confusion_matrix_rf2 <- table(test$Attrition, predictions_rf2)
+print(confusion_matrix_rf2)
+```
+
+```{r accuracy of rf2}
+library(caret)
+accuracy_rf2 <- confusionMatrix(predictions_rf2, test$Attrition)
+accuracy_rf2
+```
+The resulting ROC curve plots the false positive versus true positive rate for each class. For the non-attrition class, the area under the curve is .5943, while the attrition class has an AUC of .4056. Because the non-attrition class is below the .5 threshold, we are dissatisfied with the results of the second Random Forest model. The use of 1000 trees with 2 nodes does not work well with our data, and we should rely on other algorithms to predict attrition at Canterra. 
+```{r pred for roc curve rf2}
+#Do not include in presentation because all ROC curves will be at end.
+library(ROCR)
+# Calculate the probability of new observations belonging to each class
+# prediction_for_roc_curve will be a matrix with dimensions data_set_size x number_of_classes
+prediction_for_roc_curve_rf2 <- predict(rf2,test[,-2],type="prob")
+
+# For each class
+for (i in 1:2)
+{
+ # Assess the performance of classifier for class[i]
+ pred_rf2 <- prediction(prediction_for_roc_curve_rf2[,i],true_values)
+ perf_rf2 <- performance(pred_rf2, "tpr", "fpr")
+ if (i==1)
+ {
+     plot(perf_rf2,main="ROC Curve",col=pretty_colours[i]) 
+ }
+ else
+ {
+     plot(perf_rf2,main="ROC Curve",col=pretty_colours[i],add=TRUE) 
+ }
+ # Calculate the AUC and print it to screen
+ auc.perf_rf2 <- performance(pred_rf2, measure = "auc")
+ print(auc.perf_rf2@y.values)
+}
+
+auc_rf1 <- performance(pred_rf1, measure = "auc")@y.values[[1]]
+auc_rf2 <- performance(pred_rf2, measure = "auc")@y.values[[1]]
+```
+# Comparison of All Models
+
+```{r final comparison}
+# Loading the pROC package
+library(pROC)
+
+predicted_probs_rf1 <- predict(rf1, newdata = test, type = "prob")[,2]
+predicted_probs_rf2 <- predict(rf2, newdata = test, type = "prob")[,2]
+
+# Create ROC curve objects for each model
+
+roc_glm1 <- roc(test$Attrition, predicted_probs_glm1)
+roc_glm2 <- roc(test$Attrition, predicted_probs_glm2)
+
+# Generating the ROC curves
+
+roc_glm1 <- roc(test$Attrition, predicted_probs_glm1)
+roc_glm2 <- roc(test$Attrition, predicted_probs_glm2)
+roc_tree1 <- roc(response = test$Attrition, predictor = probabilities_tree1)
+roc_tree2 <- roc(response = test$Attrition, predictor = probabilities_tree2)
+roc_rf1 = roc(response = test$Attrition, predictor = predicted_probs_rf1)
+roc_rf2 = roc(response = test$Attrition, predictor = predicted_probs_rf2)
+# Plotting the ROC curves
+plot(roc_tree1, main="ROC Curve Comparison", col="lightblue")
+plot(roc_tree2, add=TRUE, col="darkblue")
+plot(roc_glm1, add=TRUE, col="maroon")
+plot(roc_glm2, add=TRUE, col="red3")
+plot(roc_rf1, add=TRUE, col="green3")
+plot(roc_rf2, add=TRUE, col="darkgreen")
+
+
+# Adding a legend
+legend("bottomright", legend=c("Logistic Model 1", "Logistic Model 2","Decision Tree Model 1","Decision Tree Model 2","Random Forest Model 1", "Random Forest Model 2"), col=c("maroon", "red3","lightblue","darkblue","green3","darkgreen"), lwd=2,cex=.7)
+
+# Adding a diagonal reference line
+abline(a=0, b=1, lty=2, col="gray")
+
+```
+```{r auc comparison}
+
+auc_values = c(auc_glm1,auc_glm2,auc_tree1,auc_tree2,auc_rf1,auc_rf2)
+
+
+# Create a data frame for model names and metrics
+all_model_metrics <- data.frame(
+  model_name = c("Logistic Model 1", "Logistic Model 2","Decision Tree Model 1","Decision Tree Model 2","Random Forest Model 1", "Random Forest Model 2"),
+  auc_value = auc_values
+)
+
+# Create the model summary table
+all_model_metrics %>%
+  kable("html") %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+    full_width = T,
+    position = "center",
+    font_size = 11
+  )
+```
+
