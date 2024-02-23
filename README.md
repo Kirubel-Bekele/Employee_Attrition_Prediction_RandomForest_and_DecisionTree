@@ -56,6 +56,8 @@ attrition seems to be less prevalent among the older age groups, with the “No�
 as age increases. The clear separation of colors allows us to visually assess the extent of attrition
 across different age groups, which could potentially signal areas where retention efforts might
 be most needed.
+![](Histogram.png)
+
 Further analysis of the variable reveals a discernible pattern within the organization. In reviewing
 the distribution of outcomes, we find that 711 out of 4410 employees have left the company,
 translating to 16.12%. The departure of these employees can result in substantial costs for the
@@ -74,6 +76,8 @@ indicates that the majority of employees have worked at the Company for less tha
 These insights, when viewed alongside the age distribution, paint a comprehensive picture
 of that workforce’s tendencies, revealing specific demographics and conditions that could be
 targeted to improve retention rates and reduce overall attrition.
+![](compare_histo.png)
+
 ## 4.2.2 Correlation Between Predictors
 The correlation plot in Figure 3 visualizes the relationship between various continuous variables
 within the employee dataset. The color intensity and the numerical coefficient within each cell
@@ -83,6 +87,8 @@ more years with their current manager. Another significant correlation is observ
 TotalWorkingTears and Age, with a correlation of 0.68, indicating that as employees age,
 their total working years tend to increase, as expected. Ultimately, we found that these correlations should be considered in developing our classification models to avoid potential multicollinearity. However, it is important to note that the Decision Tree and Random Forest methods
 do not require independent predictors as logistic regression does.
+![](correlation.png)
+
 ## 4.2.3 Data Partition
 Following the data wrangling phase, we moved to segment the dataset into two subsets: a training
 set, which holds 70% of the data and is utilized for training our models, and a test set, comprising
