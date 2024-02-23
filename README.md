@@ -128,7 +128,7 @@ P(M)
 BusinessT ravelF requently + 0.688925 ∗ BusinessT ravelRarely + 0.317876 ∗ M arried
 +1.167596 ∗ Single
 (1)
-## 4.3.2 Best Subset Model
+ 4.3.2 Best Subset Model
 Since we initially crafted our logistics model through a manual selection of predictors,
 we employed subset regression to identify the most influential variables as determined
 by the algorithm. This model contains the same predictors as the first, with additional
@@ -159,6 +159,7 @@ versus 4 false positives, compared with 1105 true negatives and 201 false negati
 number of false negatives, it can be inferred that the model is more specific than sensitive. However, we are 95% confident that the accuracy of this model will be between 82.43% and 86.40%.
 Though both logistic models establish a strong baseline with which to compare future models,
 it is important to consider other classification-based algorithms before proceeding with recommendations.
+
 ## 4.4 Decision Trees
 ## 4.4.1 Basic Decision Tree
 To determine which factors significantly influence employee attrition at Canterra, we utilized decision trees due to their straightforward and interpretable nature. Our initial step was to execute
@@ -187,6 +188,8 @@ Looking at the other statistics, the Kappa value of 0.1964 indicates that the mo
 correctly identifying employees who would leave. This poor balance between sensitivity and
 specificity yields an area under the curve of 0.5705. Ultimately, this initial decision tree, while
 straightforward, does not account for the additional features that may influence attrition.
+![](tree.png)
+
 ## 4.4.2 Advanced Decision Tree
 To refine our model, we introduced several parameters to add complexity and depth to our
 decision tree. We set a minimum of 20 observations per node to consider a split, a bucket
@@ -264,6 +267,8 @@ as a benchmark for random chance, and the fact that all model curves lie well ab
 indicative of their validity in classification. Table 5 supports this curve by providing values for
 the specific areas under the curve. Ultimately, we find that the Logistic Models and first Random
 Forest Model maintain the best balance between sensitivity and specificity.
+![](ROc.png)
+
 ## 6 Results
 In considering all six models, we found several underlying variables to be strong predictors of
 attrition. These variables include age, business travel, job satisfaction, and marital status. Note
